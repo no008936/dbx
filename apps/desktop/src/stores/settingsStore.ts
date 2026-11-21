@@ -1230,6 +1230,13 @@ export interface EditorSettings {
   generateSqlIncludeDatabaseName: boolean;
   generateSqlQuoteIdentifiers: boolean;
   formatSqlOnSqlFileSave: boolean;
+  /** VSCode-style auto save for unbound query tabs as local .sql files (desktop only). */
+  queryAutoSaveMode: QueryAutoSaveMode;
+  /** Delay in ms since the last keystroke for the afterDelay trigger. */
+  queryAutoSaveDelayMs: number;
+  /** Empty string resolves to <Documents>/DBX/queries on the desktop side. */
+  queryAutoSaveDir: string;
+  queryAutoSaveFilePrefix: string;
   /** Legacy alias retained for settings-file compatibility. Mirrors autoUpdateApp. */
   updateNotificationsEnabled: boolean;
   /** Legacy setting retained for compatibility. Mirrors autoUpdateApp after the centralized update controls are enabled. */
@@ -1636,6 +1643,10 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   generateSqlIncludeDatabaseName: false,
   generateSqlQuoteIdentifiers: true,
   formatSqlOnSqlFileSave: false,
+  queryAutoSaveMode: "afterDelayAndFocusChange",
+  queryAutoSaveDelayMs: 2000,
+  queryAutoSaveDir: "",
+  queryAutoSaveFilePrefix: "query",
   updateNotificationsEnabled: true,
   autoDownloadUpdates: true,
   autoUpdateApp: true,
@@ -1717,6 +1728,28 @@ export function normalizeGlobalQueryTimeoutSecs(value: unknown): number {
 
 export function normalizeGlobalConnectTimeoutSecs(value: unknown): number {
   return normalizeConnectTimeoutSecs(value);
+}
+
+export type QueryAutoSaveMode = "off" | "afterDelay" | "onFocusChange" | "afterDelayAndFocusChange";
+
+export function normalizeQueryAutoSaveMode(value: unknown): QueryAutoSaveMode {
+  return value === "off" || value === "afterDelay" || value === "onFocusChange" || value === "afterDelayAndFocusChange" ? value : DEFAULT_EDITOR_SETTINGS.queryAutoSaveMode;
+}
+
+export function normalizeQueryAutoSaveDelayMs(value: unknown): number {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : DEFAULT_EDITOR_SETTINGS.queryAutoSaveDelayMs;
+  return Math.min(60000, Math.max(500, parsed));
+}
+
+// 与 Rust 侧 sanitize_auto_save_prefix（src-tauri/src/commands/auto_save_sql.rs）语义对齐：
+// 先按字符过滤（字母数字与 `-` `_` `.`，含 Unicode 字母数字）并截断到 64 字符，再剥离前导 `.`，空结果回退 `query`。
+export function normalizeQueryAutoSaveFilePrefix(value: unknown): string {
+  const cleaned = Array.from(typeof value === "string" ? value : "")
+    .filter((ch) => /[A-Za-z0-9._-]/.test(ch) || /[\p{L}\p{N}]/u.test(ch))
+    .slice(0, 64)
+    .join("");
+  const stripped = cleaned.replace(/^\.+/, "");
+  return stripped.length > 0 ? stripped : DEFAULT_EDITOR_SETTINGS.queryAutoSaveFilePrefix;
 }
 
 function normalizeUiScale(value: unknown): number {
@@ -2432,6 +2465,10 @@ export function normalizeEditorSettings(settings: Partial<EditorSettings>, exist
     generateSqlIncludeDatabaseName: settings.generateSqlIncludeDatabaseName === true,
     generateSqlQuoteIdentifiers: typeof settings.generateSqlQuoteIdentifiers === "boolean" ? settings.generateSqlQuoteIdentifiers : DEFAULT_EDITOR_SETTINGS.generateSqlQuoteIdentifiers,
     formatSqlOnSqlFileSave: settings.formatSqlOnSqlFileSave === true,
+    queryAutoSaveMode: normalizeQueryAutoSaveMode(settings.queryAutoSaveMode),
+    queryAutoSaveDelayMs: normalizeQueryAutoSaveDelayMs(settings.queryAutoSaveDelayMs),
+    queryAutoSaveDir: typeof settings.queryAutoSaveDir === "string" ? settings.queryAutoSaveDir.trim() : DEFAULT_EDITOR_SETTINGS.queryAutoSaveDir,
+    queryAutoSaveFilePrefix: normalizeQueryAutoSaveFilePrefix(settings.queryAutoSaveFilePrefix),
     updateNotificationsEnabled: autoUpdateApp,
     autoDownloadUpdates,
     autoUpdateApp,
@@ -3431,6 +3468,10 @@ export const useSettingsStore = defineStore("settings", () => {
     if (partial.generateSqlIncludeDatabaseName !== undefined) editorSettings.value.generateSqlIncludeDatabaseName = partial.generateSqlIncludeDatabaseName === true;
     if (partial.generateSqlQuoteIdentifiers !== undefined) editorSettings.value.generateSqlQuoteIdentifiers = partial.generateSqlQuoteIdentifiers === true;
     if (partial.formatSqlOnSqlFileSave !== undefined) editorSettings.value.formatSqlOnSqlFileSave = partial.formatSqlOnSqlFileSave === true;
+    if (partial.queryAutoSaveMode !== undefined) editorSettings.value.queryAutoSaveMode = normalizeQueryAutoSaveMode(partial.queryAutoSaveMode);
+    if (partial.queryAutoSaveDelayMs !== undefined) editorSettings.value.queryAutoSaveDelayMs = normalizeQueryAutoSaveDelayMs(partial.queryAutoSaveDelayMs);
+    if (partial.queryAutoSaveDir !== undefined) editorSettings.value.queryAutoSaveDir = typeof partial.queryAutoSaveDir === "string" ? partial.queryAutoSaveDir.trim() : "";
+    if (partial.queryAutoSaveFilePrefix !== undefined) editorSettings.value.queryAutoSaveFilePrefix = normalizeQueryAutoSaveFilePrefix(partial.queryAutoSaveFilePrefix);
     if (partial.updateNotificationsEnabled !== undefined) {
       editorSettings.value.updateNotificationsEnabled = partial.updateNotificationsEnabled;
       editorSettings.value.autoUpdateApp = partial.updateNotificationsEnabled;

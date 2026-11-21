@@ -1073,6 +1073,33 @@ describe("normalizeEditorSettings", () => {
   });
 });
 
+describe("query auto save settings normalization", () => {
+  it("defaults to afterDelayAndFocusChange with 2000ms and query prefix", () => {
+    const settings = normalizeEditorSettings({});
+    expect(settings.queryAutoSaveMode).toBe("afterDelayAndFocusChange");
+    expect(settings.queryAutoSaveDelayMs).toBe(2000);
+    expect(settings.queryAutoSaveDir).toBe("");
+    expect(settings.queryAutoSaveFilePrefix).toBe("query");
+  });
+
+  it("falls back on invalid mode and clamps delay", () => {
+    expect(normalizeEditorSettings({ queryAutoSaveMode: "sometimes" } as any).queryAutoSaveMode).toBe("afterDelayAndFocusChange");
+    expect(normalizeEditorSettings({ queryAutoSaveMode: "off" } as any).queryAutoSaveMode).toBe("off");
+    expect(normalizeEditorSettings({ queryAutoSaveDelayMs: 10 } as any).queryAutoSaveDelayMs).toBe(500);
+    expect(normalizeEditorSettings({ queryAutoSaveDelayMs: 999999 } as any).queryAutoSaveDelayMs).toBe(60000);
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "../my sql " } as any).queryAutoSaveFilePrefix).toBe("mysql");
+  });
+
+  it("sanitizes the file prefix like the Rust side and falls back to query when empty", () => {
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "..." } as any).queryAutoSaveFilePrefix).toBe("query");
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "." } as any).queryAutoSaveFilePrefix).toBe("query");
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: 42 } as any).queryAutoSaveFilePrefix).toBe("query");
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "  my_query-1.txt " } as any).queryAutoSaveFilePrefix).toBe("my_query-1.txt");
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "..a" } as any).queryAutoSaveFilePrefix).toBe("a");
+    expect(normalizeEditorSettings({ queryAutoSaveFilePrefix: "a".repeat(80) } as any).queryAutoSaveFilePrefix).toBe("a".repeat(64));
+  });
+});
+
 describe("right sidebar panel transitions", () => {
   const state = (overrides: Partial<RightSidebarPanelState> = {}): RightSidebarPanelState => ({
     ai: false,

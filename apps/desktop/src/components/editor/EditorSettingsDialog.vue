@@ -1055,6 +1055,10 @@ const editOpenQueryOnConnectionOpen = ref(settingsStore.editorSettings.openQuery
 const editGenerateSqlIncludeDatabaseName = ref(settingsStore.editorSettings.generateSqlIncludeDatabaseName);
 const editGenerateSqlQuoteIdentifiers = ref(settingsStore.editorSettings.generateSqlQuoteIdentifiers);
 const editFormatSqlOnSqlFileSave = ref(settingsStore.editorSettings.formatSqlOnSqlFileSave);
+const editQueryAutoSaveMode = ref(settingsStore.editorSettings.queryAutoSaveMode);
+const editQueryAutoSaveDelayMs = ref(settingsStore.editorSettings.queryAutoSaveDelayMs);
+const editQueryAutoSaveDir = ref(settingsStore.editorSettings.queryAutoSaveDir);
+const editQueryAutoSaveFilePrefix = ref(settingsStore.editorSettings.queryAutoSaveFilePrefix);
 const editShowTableDdlHoverPreview = ref(settingsStore.editorSettings.showTableDdlHoverPreview);
 const editTableHoverLookupMode = ref<TableHoverLookupMode>(settingsStore.editorSettings.tableHoverLookupMode);
 const tableHoverLookupModeDescription = computed(() => {
@@ -1473,6 +1477,10 @@ function currentEditorSettingsDraft(): EditorSettingsDraft {
     generateSqlIncludeDatabaseName: editGenerateSqlIncludeDatabaseName.value,
     generateSqlQuoteIdentifiers: editGenerateSqlQuoteIdentifiers.value,
     formatSqlOnSqlFileSave: editFormatSqlOnSqlFileSave.value,
+    queryAutoSaveMode: editQueryAutoSaveMode.value,
+    queryAutoSaveDelayMs: editQueryAutoSaveDelayMs.value,
+    queryAutoSaveDir: editQueryAutoSaveDir.value,
+    queryAutoSaveFilePrefix: editQueryAutoSaveFilePrefix.value,
     showTableDdlHoverPreview: editShowTableDdlHoverPreview.value,
     tableHoverLookupMode: editTableHoverLookupMode.value,
     updateNotificationsEnabled: editAutoUpdateApp.value,
@@ -2200,6 +2208,10 @@ function syncEditorSettingsDraftFromStore() {
   editGenerateSqlIncludeDatabaseName.value = settingsStore.editorSettings.generateSqlIncludeDatabaseName;
   editGenerateSqlQuoteIdentifiers.value = settingsStore.editorSettings.generateSqlQuoteIdentifiers;
   editFormatSqlOnSqlFileSave.value = settingsStore.editorSettings.formatSqlOnSqlFileSave;
+  editQueryAutoSaveMode.value = settingsStore.editorSettings.queryAutoSaveMode;
+  editQueryAutoSaveDelayMs.value = settingsStore.editorSettings.queryAutoSaveDelayMs;
+  editQueryAutoSaveDir.value = settingsStore.editorSettings.queryAutoSaveDir;
+  editQueryAutoSaveFilePrefix.value = settingsStore.editorSettings.queryAutoSaveFilePrefix;
   editShowTableDdlHoverPreview.value = settingsStore.editorSettings.showTableDdlHoverPreview;
   editTableHoverLookupMode.value = settingsStore.editorSettings.tableHoverLookupMode;
   editClickTableNavigationTarget.value = settingsStore.editorSettings.clickTableNavigationTarget;
@@ -2393,6 +2405,10 @@ const editorSettingsDraftRefs: EditorSettingsDraftRefMap = {
   generateSqlIncludeDatabaseName: editGenerateSqlIncludeDatabaseName,
   generateSqlQuoteIdentifiers: editGenerateSqlQuoteIdentifiers,
   formatSqlOnSqlFileSave: editFormatSqlOnSqlFileSave,
+  queryAutoSaveMode: editQueryAutoSaveMode,
+  queryAutoSaveDelayMs: editQueryAutoSaveDelayMs,
+  queryAutoSaveDir: editQueryAutoSaveDir,
+  queryAutoSaveFilePrefix: editQueryAutoSaveFilePrefix,
   showTableDdlHoverPreview: editShowTableDdlHoverPreview,
   tableHoverLookupMode: editTableHoverLookupMode,
   updateNotificationsEnabled: editAutoUpdateApp,
@@ -3021,6 +3037,10 @@ function resetDefaultsForTab(tab: SettingsCategory) {
     editGenerateSqlIncludeDatabaseName.value = DEFAULT_EDITOR_SETTINGS.generateSqlIncludeDatabaseName;
     editGenerateSqlQuoteIdentifiers.value = DEFAULT_EDITOR_SETTINGS.generateSqlQuoteIdentifiers;
     editFormatSqlOnSqlFileSave.value = DEFAULT_EDITOR_SETTINGS.formatSqlOnSqlFileSave;
+    editQueryAutoSaveMode.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveMode;
+    editQueryAutoSaveDelayMs.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveDelayMs;
+    editQueryAutoSaveDir.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveDir;
+    editQueryAutoSaveFilePrefix.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveFilePrefix;
     editClickTableNavigationTarget.value = DEFAULT_EDITOR_SETTINGS.clickTableNavigationTarget;
     editObjectBrowserAutoOpenDetailPanel.value = DEFAULT_EDITOR_SETTINGS.objectBrowserAutoOpenDetailPanel;
     editSidebarObjectInfoMode.value = DEFAULT_EDITOR_SETTINGS.sidebarObjectInfoMode;
@@ -3264,6 +3284,10 @@ function resetAllDefaults() {
   editGenerateSqlIncludeDatabaseName.value = DEFAULT_EDITOR_SETTINGS.generateSqlIncludeDatabaseName;
   editGenerateSqlQuoteIdentifiers.value = DEFAULT_EDITOR_SETTINGS.generateSqlQuoteIdentifiers;
   editFormatSqlOnSqlFileSave.value = DEFAULT_EDITOR_SETTINGS.formatSqlOnSqlFileSave;
+  editQueryAutoSaveMode.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveMode;
+  editQueryAutoSaveDelayMs.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveDelayMs;
+  editQueryAutoSaveDir.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveDir;
+  editQueryAutoSaveFilePrefix.value = DEFAULT_EDITOR_SETTINGS.queryAutoSaveFilePrefix;
   editShowTableDdlHoverPreview.value = DEFAULT_EDITOR_SETTINGS.showTableDdlHoverPreview;
   editTableHoverLookupMode.value = DEFAULT_EDITOR_SETTINGS.tableHoverLookupMode;
   editAutoUpdateApp.value = DEFAULT_EDITOR_SETTINGS.autoUpdateApp;
