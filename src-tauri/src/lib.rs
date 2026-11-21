@@ -2929,6 +2929,8 @@ pub fn run() {
             commands::external_sql::inspect_external_sql_file,
             commands::external_sql::write_external_sql_file,
             commands::external_sql::save_external_sql_file,
+            commands::auto_save_sql::create_auto_save_sql_file,
+            commands::auto_save_sql::ensure_auto_save_dir,
             commands::list_sql_files::list_sql_files_in_folder,
             commands::list_sql_files::search_sql_file_contents,
             commands::list_sql_files::create_sql_file_in_folder,

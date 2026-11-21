@@ -212,7 +212,7 @@ fn content_hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn external_sql_file_version(metadata: &std::fs::Metadata, bytes: &[u8]) -> ExternalSqlFileVersion {
+pub(crate) fn external_sql_file_version(metadata: &std::fs::Metadata, bytes: &[u8]) -> ExternalSqlFileVersion {
     ExternalSqlFileVersion {
         size_bytes: metadata.len(),
         modified_ns: modified_ns(metadata),
