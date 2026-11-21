@@ -123,6 +123,7 @@ import { isTauriRuntime } from "@/lib/backend/tauriRuntime";
 import { openQueryResultArchiveFile } from "@/lib/query/queryResultArchiveFile";
 import { rememberExternalSqlFileTarget, resolveExternalSqlFileTarget, resolveExternalSqlFileTargetForActiveTab, unassociatedExternalSqlFileTarget } from "@/lib/sql/externalSqlFileTarget";
 import { defaultSavedQueryFileName, externalSqlFileOpenErrorMessage, externalSqlEditorMaxBytes, isSqlFilePath, isSqlOrScriptFilePath, queryTabExternalFilePath, sqlFileTitleFromPath } from "@/lib/sql/sqlFileOpen";
+import { queryAutoSaveWatchesFocusChange } from "@/lib/sql/queryTabAutoSave";
 
 import type { ConnectionConfig, DatabaseType, ObjectBrowserFilter, ObjectSourceKind, QueryTab, TableInfoTab, TabOutputView, TreeNode } from "@/types/database";
 import { OPEN_PLUGIN_SETTINGS, type PluginCenterFocus } from "@/lib/plugins/pluginCenterNavigation";
@@ -2956,6 +2957,12 @@ async function openSaveSqlDialog(tabId?: string) {
     await saveActiveObjectSource(tab);
     return;
   }
+  // 自动保存托管的 tab：Ctrl+S = 静默 flush 当前文件（Q13），不做格式化、不弹 toast；
+  // "另存为"仍走菜单项（Q6 移交语义）。
+  if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
+    await queryStore.flushQueryTabAutoSave(tab);
+    return;
+  }
   if (await saveExternalSqlPath(tab)) return;
   const existing = tab.savedSqlId ? savedSqlStore.getFile(tab.savedSqlId) : undefined;
   if (existing) {
@@ -3144,6 +3151,8 @@ async function saveExternalSqlTabAs(tab: QueryTab): Promise<boolean> {
     const saved = await api.saveExternalSqlFile(defaultName, await formattedSqlForSave(tab), filterExtension, tab.externalSqlEncoding === "auto" ? "utf8" : tab.externalSqlEncoding);
     if (!saved) return false;
     queryStore.linkExternalSqlPath(tab.id, saved.path, sqlFileTitleFromPath(saved.path), saved.version, tab.externalSqlEncoding);
+    // Q6 另存为移交：tab 跟随新路径，自动保存语义终止，后续 Ctrl+S 走常规外部文件保存流。
+    tab.autoSaveOrigin = undefined;
     rememberExternalSqlFileTarget(saved.path, { connectionId: tab.connectionId, database: tab.database, catalog: tab.catalog, schema: tab.schema });
     invalidateSaveSqlFolderSelection();
     showSaveSqlDialog.value = false;
@@ -4761,6 +4770,28 @@ function handleTabSwitcherVisibilityChange() {
   tabSwitcherKeyboard.handleVisibilityChange(document.visibilityState);
 }
 
+// 查询 tab 自动保存：失焦 / 隐藏 / 切 tab 时静默 flush（受 queryAutoSaveMode 门控，off/afterDelay 不动作）。
+function flushAutoSaveOnFocusLoss() {
+  if (!queryAutoSaveWatchesFocusChange(settingsStore.editorSettings)) return;
+  const tab = queryStore.tabs.find((candidate) => candidate.id === queryStore.activeTabId);
+  if (tab) void queryStore.flushQueryTabAutoSave(tab);
+}
+
+function flushAutoSaveOnHidden() {
+  if (document.visibilityState !== "hidden") return;
+  flushAutoSaveOnFocusLoss();
+}
+
+// 切走 active tab 时 flush 的是上一个 tab（previous），而非新激活的 tab。
+watch(
+  () => queryStore.activeTabId,
+  (_next, previous) => {
+    if (!previous || !queryAutoSaveWatchesFocusChange(settingsStore.editorSettings)) return;
+    const tab = queryStore.tabs.find((candidate) => candidate.id === previous);
+    if (tab) void queryStore.flushQueryTabAutoSave(tab);
+  },
+);
+
 function handleTabSwitcherSelect(tabId: string) {
   tabSwitcherKeyboard.reset();
   showTabSwitcher.value = false;
@@ -5566,6 +5597,8 @@ onMounted(async () => {
   window.addEventListener("keyup", handleKeyup, true);
   window.addEventListener("blur", handleTabSwitcherWindowBlur);
   document.addEventListener("visibilitychange", handleTabSwitcherVisibilityChange);
+  window.addEventListener("blur", flushAutoSaveOnFocusLoss);
+  document.addEventListener("visibilitychange", flushAutoSaveOnHidden);
   window.addEventListener("dbx-open-driver-store", openDriverStoreFromEvent);
   window.addEventListener(COMPONENT_UPDATES_CHANGED_EVENT, handleComponentUpdatesChanged);
   window.addEventListener("dbx:activate-query-surface", activateQuerySurface);
@@ -5669,6 +5702,8 @@ onUnmounted(() => {
   window.removeEventListener("keyup", handleKeyup, true);
   window.removeEventListener("blur", handleTabSwitcherWindowBlur);
   document.removeEventListener("visibilitychange", handleTabSwitcherVisibilityChange);
+  window.removeEventListener("blur", flushAutoSaveOnFocusLoss);
+  document.removeEventListener("visibilitychange", flushAutoSaveOnHidden);
   tabSwitcherKeyboard.reset();
   window.removeEventListener("dbx-open-driver-store", openDriverStoreFromEvent);
   window.removeEventListener(COMPONENT_UPDATES_CHANGED_EVENT, handleComponentUpdatesChanged);
