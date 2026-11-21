@@ -167,6 +167,7 @@ import { createSavedSqlEditorPosition, initSavedSqlEditorPositions, restoreSaved
 import { isDetachedWindow, resolveWindowContext } from "@/lib/app/windowContext";
 import { normalizeDetachedTabRuntime, type DetachedTabHandoff, type DetachedTabRuntimeState } from "@/lib/app/detachedTabHandoff";
 import { isTauriRuntime } from "@/lib/backend/tauriRuntime";
+import { isQueryTabAutoSaveCandidate as isUnboundQueryTabAutoSaveCandidate, queryAutoSaveWatchesDelay } from "@/lib/sql/queryTabAutoSave";
 import { resolveSavedSqlExecutionTarget, savedSqlExecutionTargetFromFile, savedSqlExecutionTargetFromTab, type SavedSqlExecutionTarget, type SavedSqlOpenTargetMode } from "@/lib/savedSql/savedSqlExecutionTarget";
 import { safeLocalStorageGet, safeLocalStorageRemove } from "@/lib/backend/safeStorage";
 import { sqlTextFingerprint } from "@/lib/sql/sqlTextFingerprint";
@@ -3135,6 +3136,7 @@ export const useQueryStore = defineStore("query", () => {
   // Lets callers (e.g. tests that reload the store) read back persisted state
   // deterministically instead of racing the debounce timer.
   async function flushPendingPersist(): Promise<void> {
+    await flushQueryTabAutoSaves();
     await flushDefaultQueries();
     if (isDetachedWindow()) return flushDetachedTabPersistence(activeTabId.value ?? undefined);
     if (storePersistGeneration !== persistGeneration) return Promise.resolve();
@@ -4989,6 +4991,103 @@ export const useQueryStore = defineStore("query", () => {
     defaultQuerySaveTimers.clear();
   });
 
+  // ---- 查询 tab 自动保存（规格：docs/superpowers/plans/2026-11-21-query-tab-auto-save-spec.md）----
+  const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const autoSaveSaves = new Map<string, Promise<void>>();
+  const autoSaveCloseFlushAttemptedSql = new Map<string, string>();
+
+  function isQueryTabAutoSaveCandidate(tab: QueryTab): boolean {
+    return isTauriRuntime() && isUnboundQueryTabAutoSaveCandidate(tab, isTabDirty);
+  }
+
+  function queryTabNeedsAutoSaveFlush(tab: QueryTab): boolean {
+    if (!isTauriRuntime() || tab.mode !== "query" || tab.sourceLoad) return false;
+    if (tab.autoSaveOrigin) return tab.externalSqlPath !== undefined && tab.sql !== tab.originalSql;
+    return isUnboundQueryTabAutoSaveCandidate(tab, isTabDirty);
+  }
+
+  function flushQueryTabAutoSave(tab: QueryTab): Promise<void> {
+    if (!queryTabNeedsAutoSaveFlush(tab)) return Promise.resolve();
+    const timer = autoSaveTimers.get(tab.id);
+    if (timer) {
+      clearTimeout(timer);
+      autoSaveTimers.delete(tab.id);
+    }
+    const pending = autoSaveSaves.get(tab.id);
+    if (pending) return pending;
+    const save = (async () => {
+      const sqlAtStart = tab.sql;
+      try {
+        if (!tab.externalSqlPath) {
+          const settings = useSettingsStore().editorSettings;
+          const created = await api.createAutoSaveSqlFile(settings.queryAutoSaveDir, settings.queryAutoSaveFilePrefix, sqlAtStart);
+          // 只认可本次快照：期间又编辑/关闭则交给下一轮调度，避免把新内容标成旧文件版本。
+          if (tab.sql !== sqlAtStart || !tabs.value.includes(tab)) return;
+          tab.autoSaveOrigin = true;
+          linkExternalSqlPath(tab.id, created.path, undefined, created.version, "utf8");
+          return;
+        }
+        const result = await api.writeExternalSqlFile(tab.externalSqlPath, sqlAtStart, {
+          expectedContentHash: tab.externalSqlFileVersion?.contentHash,
+          expectedMissing: tab.externalSqlFileMissing === true,
+          encoding: "utf8",
+        });
+        // Conflict/Missing 不静默覆盖：变更检测会在下次焦点/切换时弹窗裁决。
+        if (result.kind !== "written") return;
+        if (tab.sql !== sqlAtStart) return;
+        markExternalSqlFileSaved(tab.id, result.version);
+        tab.autoSaveError = undefined;
+      } catch (error) {
+        tab.autoSaveError = error instanceof Error ? error.message : String(error);
+      }
+    })();
+    autoSaveSaves.set(tab.id, save);
+    const cleanup = () => {
+      if (autoSaveSaves.get(tab.id) === save) autoSaveSaves.delete(tab.id);
+    };
+    void save.then(cleanup, cleanup);
+    return save;
+  }
+
+  async function flushQueryTabAutoSaves(): Promise<void> {
+    for (const timer of autoSaveTimers.values()) clearTimeout(timer);
+    autoSaveTimers.clear();
+    await Promise.all(tabs.value.filter(queryTabNeedsAutoSaveFlush).map((tab) => flushQueryTabAutoSave(tab)));
+  }
+
+  // 镜像 default-query 自动保存 watcher（上方 :4962）：监听内容而非 updateSql，
+  // 让格式化/历史恢复/清空编辑器也能触发或取消调度。
+  watch(
+    () => tabs.value.filter((tab) => queryTabNeedsAutoSaveFlush(tab) && queryAutoSaveWatchesDelay(useSettingsStore().editorSettings)).map((tab) => ({ id: tab.id, sql: tab.sql })),
+    (drafts) => {
+      const ids = new Set(drafts.map((draft) => draft.id));
+      for (const [id, timer] of autoSaveTimers) {
+        if (!ids.has(id)) {
+          clearTimeout(timer);
+          autoSaveTimers.delete(id);
+        }
+      }
+      const delay = useSettingsStore().editorSettings.queryAutoSaveDelayMs;
+      for (const { id } of drafts) {
+        const previous = autoSaveTimers.get(id);
+        if (previous) clearTimeout(previous);
+        autoSaveTimers.set(
+          id,
+          setTimeout(() => {
+            autoSaveTimers.delete(id);
+            const tab = tabs.value.find((item) => item.id === id);
+            if (tab) void flushQueryTabAutoSave(tab);
+          }, delay),
+        );
+      }
+    },
+    { deep: true },
+  );
+  onScopeDispose(() => {
+    for (const timer of autoSaveTimers.values()) clearTimeout(timer);
+    autoSaveTimers.clear();
+  });
+
   function isTabDirty(tab: QueryTab): boolean {
     if (tab.typeManagementDraft && tab.typeManagementDraft.state !== "complete") return true;
     if (tab.mode === "structure") {
@@ -5028,6 +5127,7 @@ export const useQueryStore = defineStore("query", () => {
   }
 
   function shouldConfirmTabOnWindowClose(tab: QueryTab): boolean {
+    if (tab.autoSaveOrigin && !tab.autoSaveError) return false;
     if (isTabDirty(tab)) return true;
     // A scratch query with SQL but no saved-SQL/file backing is still unsaved,
     // even if another flow has already refreshed its in-memory SQL baseline.
@@ -5438,6 +5538,13 @@ export const useQueryStore = defineStore("query", () => {
         .catch(reportDefaultQuerySaveError);
       return;
     }
+    // 自动保存托管的 tab：先 flush 再关闭。成功 → 干净 → 免确认关闭；
+    // 失败（本轮 sql 已尝试过）→ 落入常规未保存确认。
+    if (queryTabNeedsAutoSaveFlush(tab) && autoSaveCloseFlushAttemptedSql.get(id) !== tab.sql) {
+      autoSaveCloseFlushAttemptedSql.set(id, tab.sql);
+      void flushQueryTabAutoSave(tab).then(() => closeTab(id, { force, skipHistory }));
+      return;
+    }
     if (!force && shouldConfirmTabClose(tab)) {
       showDirtyTabCloseConfirm(tab, "tab");
       return;
@@ -5473,6 +5580,7 @@ export const useQueryStore = defineStore("query", () => {
     }
 
     tabs.value.splice(idx, 1);
+    autoSaveCloseFlushAttemptedSql.delete(id);
     releasePluginConnectionsAfterClose([tab]);
     if (tab.externalSqlPath) refreshExternalSqlFileTitles();
 
@@ -5503,6 +5611,7 @@ export const useQueryStore = defineStore("query", () => {
     if (tab.typeManagementDraft && tab.typeManagementDraft.state !== "complete") return true;
     if (tab.isDefaultQuery) return false;
     if (tab.mode === "structure") return isTabDirty(tab);
+    if (tab.autoSaveOrigin && !tab.autoSaveError) return false;
     return shouldConfirmUnsavedSqlClose.value && isTabDirty(tab);
   }
 
@@ -12304,6 +12413,9 @@ export const useQueryStore = defineStore("query", () => {
     resumeCloseConfirm,
     completePendingCloseAfterSaveAll,
     isTabDirty,
+    isQueryTabAutoSaveCandidate,
+    flushQueryTabAutoSave,
+    flushQueryTabAutoSaves,
     markTabClean,
     applyExternalSqlFileSnapshot,
     markExternalSqlFileSaved,
