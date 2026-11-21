@@ -2904,6 +2904,17 @@ async function handleSaveTab(tabId: string) {
   if (!canSaveSqlTab(tab)) return;
   const closeAfterSave = pendingAppCloseAction.value === null;
   pendingSaveShouldCloseTab.value = closeAfterSave;
+  // 自动保存托管的 tab：保存 = 静默 flush 当前文件（Q13），不做格式化、不弹 toast，与 Ctrl+S 分流一致。
+  // flush 成功（tab 已干净）按原有"保存（后关闭）"语义收尾；失败则不关闭，与 objectSource 保存失败同语义。
+  if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
+    await queryStore.flushQueryTabAutoSave(tab);
+    if (queryStore.isTabDirty(tab)) {
+      if (pendingAppCloseAction.value) cancelPendingAppClose();
+      return;
+    }
+    completePendingTabSave(tabId);
+    return;
+  }
   if (tab.objectSource) {
     const saved = await saveActiveObjectSource(tab);
     if (saved) completePendingTabSave(tabId);
