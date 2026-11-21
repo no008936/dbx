@@ -5000,14 +5000,18 @@ export const useQueryStore = defineStore("query", () => {
     return isTauriRuntime() && isUnboundQueryTabAutoSaveCandidate(tab, isTabDirty);
   }
 
-  function queryTabNeedsAutoSaveFlush(tab: QueryTab): boolean {
+  // mode=off 时自动路径（延迟 watcher、失焦 flush、closeTab/quit 持久化）一律不落盘；
+  // autoSaveOrigin 的 tab 例外：已有托管文件则脏即 flush，不受开关约束。
+  // manual=true 表示显式保存动作（Ctrl+S/保存全部/关闭前保存），绕过 off 门控。
+  function queryTabNeedsAutoSaveFlush(tab: QueryTab, options?: { manual?: boolean }): boolean {
     if (!isTauriRuntime() || tab.mode !== "query" || tab.sourceLoad) return false;
     if (tab.autoSaveOrigin) return tab.externalSqlPath !== undefined && tab.sql !== tab.originalSql;
+    if (!options?.manual && useSettingsStore().editorSettings.queryAutoSaveMode === "off") return false;
     return isUnboundQueryTabAutoSaveCandidate(tab, isTabDirty);
   }
 
-  function flushQueryTabAutoSave(tab: QueryTab): Promise<void> {
-    if (!queryTabNeedsAutoSaveFlush(tab)) return Promise.resolve();
+  function flushQueryTabAutoSave(tab: QueryTab, options?: { manual?: boolean }): Promise<void> {
+    if (!queryTabNeedsAutoSaveFlush(tab, options)) return Promise.resolve();
     const timer = autoSaveTimers.get(tab.id);
     if (timer) {
       clearTimeout(timer);
@@ -5052,7 +5056,7 @@ export const useQueryStore = defineStore("query", () => {
   async function flushQueryTabAutoSaves(): Promise<void> {
     for (const timer of autoSaveTimers.values()) clearTimeout(timer);
     autoSaveTimers.clear();
-    await Promise.all(tabs.value.filter(queryTabNeedsAutoSaveFlush).map((tab) => flushQueryTabAutoSave(tab)));
+    await Promise.all(tabs.value.filter((tab) => queryTabNeedsAutoSaveFlush(tab)).map((tab) => flushQueryTabAutoSave(tab)));
   }
 
   // 镜像 default-query 自动保存 watcher（上方 :4962）：监听内容而非 updateSql，

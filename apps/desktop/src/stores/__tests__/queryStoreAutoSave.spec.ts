@@ -10,6 +10,18 @@ const backend = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/backend/api", () => backend);
 vi.mock("@/lib/backend/tauriRuntime", () => ({ isTauriRuntime: () => true }));
+// flushPendingPersist 会问窗口上下文；node 测试环境没有 window，钉成主窗口。
+vi.mock("@/lib/app/windowContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/app/windowContext")>()),
+  isDetachedWindow: () => false,
+}));
+// flushPendingPersist → saveTabs 在 Tauri 下先写 workspace-window 快照（getCurrentWindow 需要 window）；
+// 本套件只关心 saveOpenTabsState 通道，钉成 no-op。
+vi.mock("@/lib/app/workspaceWindows", () => ({
+  saveWorkspaceWindow: vi.fn().mockResolvedValue(undefined),
+  loadWorkspaceWindow: vi.fn().mockResolvedValue(null),
+  listWorkspaceWindows: vi.fn().mockResolvedValue([]),
+}));
 
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -77,5 +89,63 @@ describe("queryStore auto save", () => {
     store.updateSql(tabId, "SELECT 1;", "editor");
     await vi.advanceTimersByTimeAsync(30000);
     expect(backend.createAutoSaveSqlFile).not.toHaveBeenCalled();
+  });
+
+  // mode=off 必须真正关闭：自动路径（flushPendingPersist / closeTab flush）不建文件、不转文件 tab；
+  // autoSaveOrigin 托管 tab 例外（脏即 flush）；显式手动 flush 绕过 off 门控。
+  describe("mode off gating", () => {
+    it("flushPendingPersist does not allocate files for dirty unbound tabs", async () => {
+      useSettingsStore().updateEditorSettings({ queryAutoSaveMode: "off" });
+      store.updateSql(tabId, "SELECT 1;", "editor");
+      await store.flushPendingPersist();
+      expect(backend.createAutoSaveSqlFile).not.toHaveBeenCalled();
+      expect(backend.writeExternalSqlFile).not.toHaveBeenCalled();
+    });
+
+    it("closeTab neither allocates a file nor blocks on a dirty unbound tab", () => {
+      useSettingsStore().updateEditorSettings({ queryAutoSaveMode: "off", confirmUnsavedSqlClose: false });
+      store.updateSql(tabId, "SELECT 1;", "editor");
+      store.closeTab(tabId);
+      expect(backend.createAutoSaveSqlFile).not.toHaveBeenCalled();
+      expect(store.tabs).toHaveLength(0);
+    });
+
+    it("flushPendingPersist still writes through an already hosted tab", async () => {
+      const t = store.tabs[0];
+      store.updateSql(tabId, "SELECT 1;", "editor");
+      backend.createAutoSaveSqlFile.mockResolvedValue({ path: "/docs/DBX/queries/20261121-query-001.sql", version: { sizeBytes: 8, modifiedNs: "0", contentHash: "hash1" } });
+      await store.flushQueryTabAutoSave(t);
+      useSettingsStore().updateEditorSettings({ queryAutoSaveMode: "off" });
+      store.updateSql(tabId, "SELECT 1; -- more", "editor");
+      backend.writeExternalSqlFile.mockResolvedValue({ kind: "written", version: { sizeBytes: 18, modifiedNs: "1", contentHash: "hash2" } });
+      await store.flushPendingPersist();
+      expect(backend.writeExternalSqlFile).toHaveBeenCalledTimes(1);
+      expect(store.isTabDirty(t)).toBe(false);
+    });
+
+    it("an explicit manual flush still allocates a file for unbound candidates", async () => {
+      useSettingsStore().updateEditorSettings({ queryAutoSaveMode: "off" });
+      store.updateSql(tabId, "SELECT 1;", "editor");
+      backend.createAutoSaveSqlFile.mockResolvedValue({ path: "/docs/DBX/queries/20261121-query-001.sql", version: { sizeBytes: 8, modifiedNs: "0", contentHash: "hash1" } });
+      await store.flushQueryTabAutoSave(store.tabs[0], { manual: true });
+      expect(backend.createAutoSaveSqlFile).toHaveBeenCalledWith("", "query", "SELECT 1;");
+      expect(store.tabs[0].autoSaveOrigin).toBe(true);
+    });
+  });
+
+  // 冲突静默语义：external 写回返回 conflict 时不静默覆盖、不标错误、不标干净、不重试。
+  describe("conflict semantics", () => {
+    it("a conflict write stays silent: no error marker, tab stays dirty, no retry", async () => {
+      const t = store.tabs[0];
+      store.updateSql(tabId, "SELECT 1;", "editor");
+      backend.createAutoSaveSqlFile.mockResolvedValue({ path: "/docs/DBX/queries/20261121-query-001.sql", version: { sizeBytes: 8, modifiedNs: "0", contentHash: "hash1" } });
+      await store.flushQueryTabAutoSave(t);
+      store.updateSql(tabId, "SELECT 1; -- more", "editor");
+      backend.writeExternalSqlFile.mockResolvedValue({ kind: "conflict", currentVersion: { sizeBytes: 99, modifiedNs: "9", contentHash: "external" } });
+      await expect(store.flushQueryTabAutoSave(t)).resolves.toBeUndefined();
+      expect(t.autoSaveError).toBeUndefined();
+      expect(store.isTabDirty(t)).toBe(true);
+      expect(backend.writeExternalSqlFile).toHaveBeenCalledTimes(1);
+    });
   });
 });

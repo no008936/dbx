@@ -2813,7 +2813,8 @@ async function saveTabForCloseAll(tabId: string): Promise<boolean> {
   // 与 Ctrl+S/handleSaveTab 分流一致。flush 成功（tab 已干净）按既有"已保存"路径返回 true（照常关闭）；
   // 失败仍脏则返回 false，交给调用方的 break/resumeCloseConfirm 既有失败语义。
   if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
-    await queryStore.flushQueryTabAutoSave(tab);
+    // 显式保存动作：manual 绕过自动保存 off 门控（未绑定候选也允许落盘）。
+    await queryStore.flushQueryTabAutoSave(tab, { manual: true });
     return !queryStore.isTabDirty(tab);
   }
 
@@ -2915,7 +2916,8 @@ async function handleSaveTab(tabId: string) {
   // 自动保存托管的 tab：保存 = 静默 flush 当前文件（Q13），不做格式化、不弹 toast，与 Ctrl+S 分流一致。
   // flush 成功（tab 已干净）按原有"保存（后关闭）"语义收尾；失败则不关闭，与 objectSource 保存失败同语义。
   if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
-    await queryStore.flushQueryTabAutoSave(tab);
+    // 显式保存动作：manual 绕过自动保存 off 门控（未绑定候选也允许落盘）。
+    await queryStore.flushQueryTabAutoSave(tab, { manual: true });
     if (queryStore.isTabDirty(tab)) {
       if (pendingAppCloseAction.value) cancelPendingAppClose();
       return;
@@ -2979,7 +2981,8 @@ async function openSaveSqlDialog(tabId?: string) {
   // 自动保存托管的 tab：Ctrl+S = 静默 flush 当前文件（Q13），不做格式化、不弹 toast；
   // "另存为"仍走菜单项（Q6 移交语义）。
   if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
-    await queryStore.flushQueryTabAutoSave(tab);
+    // 显式保存动作（Ctrl+S）：manual 绕过自动保存 off 门控（未绑定候选也允许落盘）。
+    await queryStore.flushQueryTabAutoSave(tab, { manual: true });
     return;
   }
   if (await saveExternalSqlPath(tab)) return;
