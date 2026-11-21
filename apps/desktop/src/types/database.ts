@@ -2631,6 +2631,10 @@ export interface QueryTab {
   externalSqlFileVersion?: ExternalSqlFileVersion;
   externalSqlIgnoredFileVersion?: ExternalSqlFileVersion;
   externalSqlFileMissing?: boolean;
+  /** Set when this tab's file was created by query-tab auto save; drives the file-name title. */
+  autoSaveOrigin?: boolean;
+  /** Last auto save failure message. Runtime-only: never serialized into open-tabs state. */
+  autoSaveError?: string;
   originalSql?: string;
   lastExecutedSql?: string;
   resultBaseSql?: string;

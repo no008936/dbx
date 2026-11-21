@@ -500,3 +500,19 @@ describe("openTabsPersistence oversized SQL", () => {
     expect(saved.resultRuns?.[0]?.sql.length).toBe(MAX_PERSISTED_TAB_SQL_CHARS);
   });
 });
+
+describe("openTabsPersistence autoSaveOrigin round-trip", () => {
+  it("persists autoSaveOrigin but never autoSaveError", () => {
+    const tabs = [queryTab({ sql: "SELECT 1", originalSql: "", externalSqlPath: "/docs/DBX/queries/20261121-query-001.sql", externalSqlFileVersion: { sizeBytes: 8, modifiedNs: "0", contentHash: "abc" }, autoSaveOrigin: true, autoSaveError: "disk full" })];
+    const saved = serializeOpenTabs(tabs);
+    expect(saved[0].autoSaveOrigin).toBe(true);
+    expect("autoSaveError" in saved[0]).toBe(false);
+    const restored = restoreOpenTabsPayload({ tabs: saved, activeTabId: tabs[0].id }).tabs;
+    expect(restored[0].autoSaveOrigin).toBe(true);
+  });
+
+  it("omits autoSaveOrigin for plain tabs", () => {
+    const saved = serializeOpenTabs([queryTab({})]);
+    expect("autoSaveOrigin" in saved[0]).toBe(false);
+  });
+});
