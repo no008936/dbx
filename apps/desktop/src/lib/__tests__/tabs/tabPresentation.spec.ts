@@ -784,6 +784,27 @@ describe("tab group presentation", () => {
     expect(tabDisplayTitle(queryTab({ connectionId: "conn-1", database: "app", schema: "app" }), translate)).toBe("PostgreSQL@app");
   });
 
+  it("auto saved tabs show file base name plus connection scope", () => {
+    const store = useConnectionStore();
+    store.connections = [{ id: "conn-1", name: "PostgreSQL", db_type: "postgres", database: "orders" } as ConnectionConfig];
+
+    const auto = queryTab({ title: "20261121-query-001", customTitle: true, externalSqlPath: "/docs/DBX/queries/20261121-query-001.sql", autoSaveOrigin: true, connectionId: "conn-1", database: "orders" });
+    expect(tabDisplayTitle(auto, translate)).toBe("20261121-query-001 · PostgreSQL@orders");
+
+    const settings = useSettingsStore();
+    settings.editorSettings.compactTabTitle = true;
+    expect(tabDisplayTitle(auto, translate)).toBe("20261121-query-001");
+    settings.editorSettings.compactTabTitle = false;
+  });
+
+  it("regular external file tabs keep the plain file title", () => {
+    const store = useConnectionStore();
+    store.connections = [{ id: "conn-1", name: "PostgreSQL", db_type: "postgres", database: "orders" } as ConnectionConfig];
+
+    const file = queryTab({ title: "notes.sql", customTitle: true, externalSqlPath: "/tmp/notes.sql", connectionId: "conn-1", database: "orders" });
+    expect(tabDisplayTitle(file, translate)).toBe("notes.sql");
+  });
+
   it("includes schema in tab tooltips when schema is present", () => {
     const store = useConnectionStore();
     store.connections = [{ id: "conn-1", name: "PostgreSQL", db_type: "postgres", database: "app" } as ConnectionConfig];

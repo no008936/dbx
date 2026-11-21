@@ -2776,6 +2776,7 @@ export default withEnglishFallback({
     tooltipFilePath: "文件路径：",
     tooltipFileStatus: "文件状态：",
     externalFileMissing: "已在 DBX 外部删除或移动",
+    tooltipAutoSaveError: "自动保存错误",
     tooltipConnection: "连接：",
     tooltipGroup: "分组：",
     tooltipDatabase: "数据库：",

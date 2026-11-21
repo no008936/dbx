@@ -2425,6 +2425,7 @@ watch([() => props.specialPageTabs?.settingsActive, () => props.specialPageTabs?
                               </span>
                             </TabExecutionStatus>
                             <span v-if="isTabBarCollapsed && isDirtyTab(entry.tab)" class="compact-dirty-tab-marker" aria-hidden="true" />
+                            <span v-if="isTabBarCollapsed && entry.tab.autoSaveError" :title="entry.tab.autoSaveError" class="compact-auto-save-error-tab-marker" aria-hidden="true" />
                             <input
                               v-if="editingTabId === entry.tab.id && !isTabBarCollapsed"
                               v-model="editingTitle"
@@ -2439,6 +2440,7 @@ watch([() => props.specialPageTabs?.settingsActive, () => props.specialPageTabs?
                             />
                             <span v-else-if="!isTabBarCollapsed" class="inline-flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-foreground">
                               <span v-if="isDirtyTab(entry.tab)" aria-hidden="true" class="dirty-tab-marker">*</span>
+                              <span v-if="entry.tab.autoSaveError" :title="entry.tab.autoSaveError" class="auto-save-error-tab-marker" aria-hidden="true" />
                               <span class="flex min-w-0 flex-1 items-center overflow-hidden">
                                 <span class="min-w-0 truncate" :style="tabTitleStyle(entry.tab)" data-tab-title-base>{{ tabTitleBase(entry.tab) }}</span>
                                 <span v-if="tabTitleSuffixText(entry.tab)" class="tab-title-suffix max-w-full shrink-0 overflow-hidden pl-1 text-ellipsis whitespace-nowrap" :style="tabTitleStyle(entry.tab)" data-tab-title-suffix>{{ tabTitleSuffixText(entry.tab) }}</span>

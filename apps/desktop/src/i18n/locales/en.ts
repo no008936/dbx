@@ -2846,6 +2846,7 @@ export default {
     tooltipFilePath: "File Path:",
     tooltipFileStatus: "File Status:",
     externalFileMissing: "Deleted or moved outside DBX",
+    tooltipAutoSaveError: "Auto save error",
     tooltipConnection: "Connection:",
     tooltipGroup: "Group:",
     tooltipDatabase: "Database:",

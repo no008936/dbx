@@ -327,10 +327,20 @@ export function tabDisplayTitle(tab: QueryTab, t: Translate): string {
     return `${tab.tableMeta.tableName}${suffix}`;
   }
   if (tab.mode === "query") {
+    const hasDatabase = Boolean(tab.database?.trim());
+    // Auto saved tabs live under DBX's managed query folder, so the file base
+    // name alone is ambiguous; scope it with the connection like other tabs.
+    if (tab.autoSaveOrigin && tab.externalSqlPath && tab.title.trim()) {
+      const schema = tab.schema?.trim();
+      let scope = database;
+      if (schema && schema !== tab.database) scope = hasDatabase ? `${database}.${schema}` : schema;
+      if (tab.catalog?.trim()) scope = `${tab.catalog.trim()}.${scope}`;
+      const base = queryTitle(tab) ?? tab.title.trim();
+      return compact ? base : `${base} · ${connectionDisplayName(tab.connectionId)}@${scope}`;
+    }
     const title = queryTitle(tab);
     if (title) return title;
     if (compact) return connectionDisplayName(tab.connectionId);
-    const hasDatabase = Boolean(tab.database?.trim());
     const schema = tab.schema?.trim();
     let scope = database;
     if (schema && schema !== tab.database) {
@@ -452,6 +462,7 @@ export function tabTooltipLines(tab: QueryTab, t: Translate): { label: string; v
   if (customSuffix) lines.unshift({ label: t("tabs.tooltipSuffix"), value: customSuffix });
   if (tab.mode === "query" && tab.externalSqlPath) {
     lines.push({ label: t("tabs.tooltipFilePath"), value: tab.externalSqlPath });
+    if (tab.autoSaveError) lines.push({ label: t("tabs.tooltipAutoSaveError"), value: tab.autoSaveError });
     if (tab.externalSqlFileMissing) lines.push({ label: t("tabs.tooltipFileStatus"), value: t("tabs.externalFileMissing") });
   }
   if (tab.mode === "data" && tab.tableMeta?.tableName) {
