@@ -3305,6 +3305,14 @@ export async function writeExternalSqlFile(_path: string, _content: string, _opt
   throw new Error("Saving external SQL file paths is only available in the desktop app");
 }
 
+export async function createAutoSaveSqlFile(_dir: string, _prefix: string, _content: string): Promise<import("@/lib/backend/tauri").AutoSaveSqlFileCreated> {
+  throw new Error("Query tab auto save is only available in the desktop app");
+}
+
+export async function ensureAutoSaveDir(_dir: string): Promise<string> {
+  throw new Error("Query tab auto save is only available in the desktop app");
+}
+
 export async function saveExternalSqlFile(_defaultFileName: string, _content: string, _filterExtension?: string, _encoding?: string): Promise<{ path: string; version: import("@/types/database").ExternalSqlFileVersion } | null> {
   throw new Error("Saving SQL files locally is only available in the desktop app");
 }

@@ -1473,6 +1473,19 @@ export async function writeExternalSqlFile(path: string, content: string, option
   });
 }
 
+export interface AutoSaveSqlFileCreated {
+  path: string;
+  version: ExternalSqlFileVersion;
+}
+
+export async function createAutoSaveSqlFile(dir: string, prefix: string, content: string): Promise<AutoSaveSqlFileCreated> {
+  return invoke("create_auto_save_sql_file", { dir, prefix, content });
+}
+
+export async function ensureAutoSaveDir(dir: string): Promise<string> {
+  return invoke("ensure_auto_save_dir", { dir });
+}
+
 export async function saveExternalSqlFile(defaultFileName: string, content: string, filterExtension?: string, encoding?: string): Promise<{ path: string; version: ExternalSqlFileVersion } | null> {
   return invoke("save_external_sql_file", { defaultFileName, content, filterExtension, encoding: encoding ?? "utf8" });
 }
