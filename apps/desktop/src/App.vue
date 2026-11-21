@@ -2809,6 +2809,14 @@ async function saveTabForCloseAll(tabId: string): Promise<boolean> {
   }
   if (!canSaveSqlTab(tab)) return true;
 
+  // 自动保存托管的 tab：保存全部/批量关闭 = 静默 flush 当前文件（Q13），不做格式化、不弹 toast，
+  // 与 Ctrl+S/handleSaveTab 分流一致。flush 成功（tab 已干净）按既有"已保存"路径返回 true（照常关闭）；
+  // 失败仍脏则返回 false，交给调用方的 break/resumeCloseConfirm 既有失败语义。
+  if (!tab.savedSqlId && !tab.objectSource && (tab.autoSaveOrigin || queryStore.isQueryTabAutoSaveCandidate(tab))) {
+    await queryStore.flushQueryTabAutoSave(tab);
+    return !queryStore.isTabDirty(tab);
+  }
+
   if (tab.objectSource) return saveActiveObjectSource(tab);
 
   if (await saveExternalSqlPath(tab)) return !queryStore.isTabDirty(tab);
