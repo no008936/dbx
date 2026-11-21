@@ -122,6 +122,7 @@ import {
   type CsvQuoteMode,
   type CsvNullMode,
   type QueryResultExportFileNameSource,
+  type QueryAutoSaveMode,
   type CustomThemeColors,
   type CustomTheme,
   DEFAULT_CUSTOM_THEMES,
@@ -195,6 +196,8 @@ import {
   localBackupInspect,
   clearBackgroundImage,
   saveBackgroundImage,
+  ensureAutoSaveDir,
+  openPathWithDefaultApp,
   loadMaxAgentTurns,
   saveMaxAgentTurns,
   setShortcutRecording,
@@ -3955,6 +3958,66 @@ async function pickCustomSkillRoot() {
   if (typeof selected !== "string" || !selected) return;
   customSkillRootDraft.value = selected;
   await settingsStore.updateDesktopSettings({ custom_ai_skill_root: selected });
+}
+
+// 查询 tab 自动保存（桌面独占）：每个控件改动即持久化。落盘由 store 侧规范化
+// （clamp 500–60000、trim 目录、前缀回退默认值），完成后回写落盘值到草稿，并把
+// Apply 基线同步到同一值，避免已落盘的键在底部一直显示“未保存”。
+async function persistQueryAutoSaveKeys(partial: Partial<Pick<EditorSettings, "queryAutoSaveMode" | "queryAutoSaveDelayMs" | "queryAutoSaveDir" | "queryAutoSaveFilePrefix">>) {
+  try {
+    await settingsStore.updateEditorSettingsAndPersist(partial);
+  } catch (error) {
+    applySettingsErrorToast(error);
+  }
+  const settings = settingsStore.editorSettings;
+  editQueryAutoSaveMode.value = settings.queryAutoSaveMode;
+  editQueryAutoSaveDelayMs.value = settings.queryAutoSaveDelayMs;
+  editQueryAutoSaveDir.value = settings.queryAutoSaveDir;
+  editQueryAutoSaveFilePrefix.value = settings.queryAutoSaveFilePrefix;
+  editEditorSettingsBase.value = {
+    ...editEditorSettingsBase.value,
+    queryAutoSaveMode: settings.queryAutoSaveMode,
+    queryAutoSaveDelayMs: settings.queryAutoSaveDelayMs,
+    queryAutoSaveDir: settings.queryAutoSaveDir,
+    queryAutoSaveFilePrefix: settings.queryAutoSaveFilePrefix,
+  };
+}
+
+function commitQueryAutoSaveDelay() {
+  const parsed = Number(editQueryAutoSaveDelayMs.value);
+  const delay = Number.isFinite(parsed) ? parsed : settingsStore.editorSettings.queryAutoSaveDelayMs;
+  void persistQueryAutoSaveKeys({ queryAutoSaveDelayMs: delay });
+}
+
+function commitQueryAutoSaveDir() {
+  void persistQueryAutoSaveKeys({ queryAutoSaveDir: editQueryAutoSaveDir.value.trim() });
+}
+
+function commitQueryAutoSavePrefix() {
+  void persistQueryAutoSaveKeys({ queryAutoSaveFilePrefix: editQueryAutoSaveFilePrefix.value });
+}
+
+async function pickQueryAutoSaveDir() {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title: t("settings.queryAutoSaveDirectoryChoose"),
+    defaultPath: editQueryAutoSaveDir.value.trim() || undefined,
+  });
+  if (typeof selected !== "string" || !selected.trim()) return;
+  editQueryAutoSaveDir.value = selected.trim();
+  await persistQueryAutoSaveKeys({ queryAutoSaveDir: selected.trim() });
+}
+
+async function openQueryAutoSaveDir() {
+  try {
+    const dir = await ensureAutoSaveDir(editQueryAutoSaveDir.value.trim());
+    await persistQueryAutoSaveKeys({ queryAutoSaveDir: dir });
+    await openPathWithDefaultApp(dir);
+  } catch (error) {
+    toast(t("toolbar.sqlSaveFailed", { message: error instanceof Error ? error.message : String(error) }), 5000);
+  }
 }
 
 const activeSettingsTab = ref("appearance");
@@ -9052,6 +9115,61 @@ onUnmounted(() => {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+                </div>
+
+                <div v-if="!isWeb" id="editor-query-auto-save" data-settings-search-id="editor-query-auto-save" :class="['space-y-3 md:col-span-2', settingsSearchTargetClass('editor-query-auto-save')]">
+                  <Separator />
+                  <div class="settings-item flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
+                    <div class="min-w-0 space-y-1">
+                      <Label for="editor-query-auto-save-mode">{{ t("settings.queryAutoSaveMode") }}</Label>
+                      <p class="text-xs text-muted-foreground">{{ t("settings.queryAutoSaveModeDescription") }}</p>
+                    </div>
+                    <Select
+                      :model-value="settingsStore.editorSettings.queryAutoSaveMode"
+                      @update:model-value="
+                        (value) => {
+                          void persistQueryAutoSaveKeys({ queryAutoSaveMode: value as QueryAutoSaveMode });
+                        }
+                      "
+                    >
+                      <SelectTrigger id="editor-query-auto-save-mode" class="h-8 w-44 shrink-0 px-2 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="afterDelayAndFocusChange">{{ t("settings.queryAutoSaveModeBoth") }}</SelectItem>
+                        <SelectItem value="afterDelay">{{ t("settings.queryAutoSaveModeAfterDelay") }}</SelectItem>
+                        <SelectItem value="onFocusChange">{{ t("settings.queryAutoSaveModeOnFocusChange") }}</SelectItem>
+                        <SelectItem value="off">{{ t("settings.queryAutoSaveModeOff") }}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div v-if="settingsStore.editorSettings.queryAutoSaveMode !== 'off'" class="settings-item flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
+                    <div class="min-w-0 space-y-1">
+                      <Label for="editor-query-auto-save-delay">{{ t("settings.queryAutoSaveDelay") }}</Label>
+                      <p class="text-xs text-muted-foreground">{{ t("settings.queryAutoSaveDelayDescription") }}</p>
+                    </div>
+                    <Input id="editor-query-auto-save-delay" v-model="editQueryAutoSaveDelayMs" type="number" class="h-8 w-28 shrink-0 text-xs" @blur="commitQueryAutoSaveDelay" @keydown.enter="commitQueryAutoSaveDelay" />
+                  </div>
+                  <div class="settings-item space-y-2 rounded-md border bg-muted/20 px-3 py-2">
+                    <div class="flex items-center justify-between gap-4">
+                      <div class="space-y-1">
+                        <Label for="editor-query-auto-save-dir">{{ t("settings.queryAutoSaveDirectory") }}</Label>
+                        <p class="text-xs text-muted-foreground">{{ t("settings.queryAutoSaveDirectoryDescription") }}</p>
+                      </div>
+                      <Button variant="outline" size="sm" class="h-8 shrink-0 px-2" @click="openQueryAutoSaveDir">{{ t("settings.queryAutoSaveDirectoryOpen") }}</Button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <Input id="editor-query-auto-save-dir" v-model="editQueryAutoSaveDir" :placeholder="t('settings.queryAutoSaveDirectoryPlaceholder')" class="h-8 flex-1 font-mono text-xs" @blur="commitQueryAutoSaveDir" @keydown.enter="commitQueryAutoSaveDir" />
+                      <Button variant="outline" size="sm" class="h-8 shrink-0 px-2" :aria-label="t('settings.queryAutoSaveDirectoryChoose')" @click="pickQueryAutoSaveDir">
+                        <FolderOpen class="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div class="settings-item flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
+                    <div class="min-w-0 space-y-1">
+                      <Label for="editor-query-auto-save-prefix">{{ t("settings.queryAutoSaveFilePrefix") }}</Label>
+                      <p class="text-xs text-muted-foreground">{{ t("settings.queryAutoSaveFilePrefixDescription") }}</p>
+                    </div>
+                    <Input id="editor-query-auto-save-prefix" v-model="editQueryAutoSaveFilePrefix" class="h-8 w-32 shrink-0 font-mono text-xs" @blur="commitQueryAutoSavePrefix" @keydown.enter="commitQueryAutoSavePrefix" />
                   </div>
                 </div>
 
