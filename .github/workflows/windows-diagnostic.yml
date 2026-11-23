@@ -6,7 +6,7 @@ on:
       target_ref:
         description: "Branch, tag, or SHA to build"
         required: true
-        default: "codex/windows-startup-diagnostics"
+        default: "feat/query-tab-auto-save"
 
 permissions:
   contents: read
