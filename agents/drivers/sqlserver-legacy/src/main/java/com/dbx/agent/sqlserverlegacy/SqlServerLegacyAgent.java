@@ -20,6 +20,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -235,6 +236,43 @@ public final class SqlServerLegacyAgent extends ConfiguredJdbcAgent {
                 }
             }
             throw withLegacyTlsDiagnostics(error, jdbcDriverVersion(), requestedTlsProtocol(params));
+        }
+    }
+
+    @Override
+    protected void afterPhysicalConnect(ConnectParams params, Connection connection) throws Exception {
+        applyInitBatches(params, connection);
+    }
+
+    @Override
+    protected Connection openTestConnection(ConnectParams params) throws Exception {
+        // SQL Server SET options are per session, so a test connection must execute the
+        // init script exactly like the pooled sessions a real connection will use.
+        return openInitializedConnection(params);
+    }
+
+    /**
+     * Applies the connection init script to a freshly opened physical session. The host
+     * splits the script into SQL Server batches with the shared batch splitter; a failing
+     * batch fails the connection instead of leaving a partially configured session.
+     */
+    private static void applyInitBatches(ConnectParams params, Connection connection) throws Exception {
+        List<String> batches = params == null ? Collections.emptyList() : params.getInit_batches();
+        for (int index = 0; index < batches.size(); index++) {
+            String batch = batches.get(index);
+            if (batch == null || batch.trim().isEmpty()) {
+                continue;
+            }
+            try (Statement sql = connection.createStatement()) {
+                sql.execute(batch);
+            } catch (SQLException error) {
+                throw new SQLException(
+                    "Connection init script batch " + (index + 1) + " failed: " + error.getMessage(),
+                    error.getSQLState(),
+                    error.getErrorCode(),
+                    error
+                );
+            }
         }
     }
 
@@ -707,8 +745,18 @@ public final class SqlServerLegacyAgent extends ConfiguredJdbcAgent {
     }
 
     static String unqualifiedObjectSchemaSql() {
-        return "SELECT COALESCE(OBJECT_SCHEMA_NAME(OBJECT_ID(QUOTENAME(?))), "
-            + "NULLIF(SCHEMA_NAME(), N''), N'dbo') AS schema_name";
+        // OBJECT_SCHEMA_NAME only exists from SQL Server 2008 on; SQL Server 2005
+        // answers error 195 ("not a recognized built-in function name"), which
+        // surfaced right after CREATE TABLE while DBX refreshed the new table's
+        // structure. Resolve the object's schema through sys.objects instead:
+        // default schema first, then dbo, then any other schema.
+        return "SELECT COALESCE(("
+            + "SELECT TOP 1 s.name FROM sys.objects o "
+            + "JOIN sys.schemas s ON s.schema_id = o.schema_id "
+            + "WHERE o.name = ? AND o.type IN ('U', 'V') "
+            + "ORDER BY CASE WHEN s.name = SCHEMA_NAME() THEN 0 "
+            + "WHEN s.name = N'dbo' THEN 1 ELSE 2 END, s.name"
+            + "), NULLIF(SCHEMA_NAME(), N''), N'dbo') AS schema_name";
     }
 
     static String sqlServer2000ObjectSchemaSql() {

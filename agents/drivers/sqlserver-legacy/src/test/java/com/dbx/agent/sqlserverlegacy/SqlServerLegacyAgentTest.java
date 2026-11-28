@@ -20,6 +20,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -332,9 +333,17 @@ class SqlServerLegacyAgentTest {
         Assertions.assertEquals("sales", SqlServerLegacyAgent.normalizeMetadataSchema("sales", "dbo"));
         Assertions.assertEquals("tenant_owner", SqlServerLegacyAgent.normalizeMetadataSchema("", "tenant_owner"));
         Assertions.assertEquals("dbo", SqlServerLegacyAgent.normalizeMetadataSchema(null, "  "));
+        String unqualifiedSchemaSql = SqlServerLegacyAgent.unqualifiedObjectSchemaSql();
+        // SQL Server 2005 has no OBJECT_SCHEMA_NAME; the lookup has to stay on
+        // 2005 catalogs (sys.objects/sys.schemas) and 2005 syntax (TOP, no OFFSET).
+        Assertions.assertFalse(unqualifiedSchemaSql.contains("OBJECT_SCHEMA_NAME"));
+        Assertions.assertFalse(unqualifiedSchemaSql.contains("OFFSET"));
         Assertions.assertEquals(
-            "SELECT COALESCE(OBJECT_SCHEMA_NAME(OBJECT_ID(QUOTENAME(?))), NULLIF(SCHEMA_NAME(), N''), N'dbo') AS schema_name",
-            SqlServerLegacyAgent.unqualifiedObjectSchemaSql()
+            "SELECT COALESCE((SELECT TOP 1 s.name FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id "
+                + "WHERE o.name = ? AND o.type IN ('U', 'V') "
+                + "ORDER BY CASE WHEN s.name = SCHEMA_NAME() THEN 0 WHEN s.name = N'dbo' THEN 1 ELSE 2 END, s.name"
+                + "), NULLIF(SCHEMA_NAME(), N''), N'dbo') AS schema_name",
+            unqualifiedSchemaSql
         );
         Assertions.assertEquals(
             "SELECT TOP 1 u.name AS schema_name FROM sysobjects o JOIN sysusers u ON o.uid = u.uid "
@@ -813,6 +822,51 @@ class SqlServerLegacyAgentTest {
             baseDdl,
             SqlServerLegacyAgent.appendTableCommentDdl(baseDdl, "dbo", "Users", "   ")
         );
+    }
+
+    @Test
+    void physicalConnectionRunsConnectionInitBatches() throws Exception {
+        SqlServerLegacyAgent agent = new SqlServerLegacyAgent();
+        List<String> executed = new ArrayList<>();
+        java.sql.Statement statement = proxy(java.sql.Statement.class, (method, args) -> {
+            if ("execute".equals(method.getName())) {
+                executed.add((String) args[0]);
+                return true;
+            }
+            return defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (method, args) -> {
+            if ("createStatement".equals(method.getName())) return statement;
+            return defaultValue(method.getReturnType());
+        });
+        ConnectParams params = new ConnectParams();
+        params.setInit_batches(Arrays.asList("SET ARITHABORT ON;", "   ", "SET ANSI_NULLS ON;"));
+
+        agent.afterPhysicalConnect(params, connection);
+
+        Assertions.assertEquals(Arrays.asList("SET ARITHABORT ON;", "SET ANSI_NULLS ON;"), executed);
+    }
+
+    @Test
+    void initBatchFailureFailsTheConnectionWithTheBatchPosition() {
+        SqlServerLegacyAgent agent = new SqlServerLegacyAgent();
+        java.sql.Statement statement = proxy(java.sql.Statement.class, (method, args) -> {
+            if ("execute".equals(method.getName())) throw new SQLException("Incorrect syntax near 'ON'");
+            return defaultValue(method.getReturnType());
+        });
+        Connection connection = proxy(Connection.class, (method, args) -> {
+            if ("createStatement".equals(method.getName())) return statement;
+            return defaultValue(method.getReturnType());
+        });
+        ConnectParams params = new ConnectParams();
+        params.setInit_batches(Arrays.asList("SET ARITHABORT ON", "BROKEN"));
+
+        SQLException error = Assertions.assertThrows(
+            SQLException.class,
+            () -> agent.afterPhysicalConnect(params, connection)
+        );
+
+        Assertions.assertEquals("Connection init script batch 1 failed: Incorrect syntax near 'ON'", error.getMessage());
     }
 
     /**
